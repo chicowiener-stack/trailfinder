@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Trailfinder Rhein-Neckar</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: Vollbildkarte, schwebendes Panel (Desktop links, Mobil als Bottom-Sheet) */
+:root{
+  --bg:#f3f4ef; --panel:#fbfcf8; --fg:#1d2420; --muted:#5d6a62; --line:#d6dbd2;
+  --accent:#d1561f; --accent-fg:#fff;
+  --s0:#2f9e44; --s1:#1c7ed6; --s2:#e03131; --s3:#212529; --s4:#9c36b5; --nr:#868e96;
+  --display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#141917; --panel:#1b211e; --fg:#e7ece8; --muted:#9aa69f; --line:#2e3732;
+  --s3:#dee2e6; color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 var(--body)}
+#map{position:fixed;inset:0;background:var(--bg)}
+.panel{position:fixed;z-index:1000;top:max(12px,env(safe-area-inset-top));left:max(12px,env(safe-area-inset-left));
+  width:330px;max-height:calc(100% - 24px);overflow:auto;background:var(--panel);border:1px solid var(--line);
+  border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.18);display:flex;flex-direction:column}
+.head{padding:14px 16px 10px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+.head h1{font:700 26px/1 var(--display);letter-spacing:.02em;margin:0;text-transform:uppercase}
+.head h1 span{color:var(--accent)}
+.toggle{margin-left:auto;display:none;background:none;border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:4px 10px;font:inherit}
+.body{padding:12px 16px 16px;display:flex;flex-direction:column;gap:14px}
+.lbl{font:600 11px/1 var(--body);text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px}
+.btn{appearance:none;border:0;border-radius:8px;padding:10px 12px;font:600 14px var(--body);cursor:pointer;
+  background:var(--accent);color:var(--accent-fg);width:100%}
+.btn:disabled{opacity:.6;cursor:wait}
+.btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--line);font-weight:500}
+.row{display:flex;gap:8px}
+.row>*{flex:1}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:5px 10px;
+  cursor:pointer;user-select:none;background:transparent;color:var(--fg);font:500 13px var(--body)}
+.chip i{width:12px;height:4px;border-radius:2px;display:inline-block}
+.chip[aria-pressed=false]{opacity:.4}
+.chip:focus-visible,.btn:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+select{width:100%;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:inherit}
+.check{display:flex;gap:8px;align-items:flex-start;font-size:13px}
+table{width:100%;border-collapse:collapse;font:500 12px var(--mono);font-variant-numeric:tabular-nums}
+td{padding:3px 0;border-bottom:1px dashed var(--line)}
+td:last-child{text-align:right}
+.status{font-size:12px;color:var(--muted);min-height:1.2em}
+.links a{color:var(--accent);font-weight:600;text-decoration:none}
+.links{display:flex;flex-direction:column;gap:6px;font-size:13px}
+.note{font-size:11px;color:var(--muted)}
+.leaflet-popup-content{font:13px/1.45 var(--body)}
+.pop h3{font:700 18px/1.1 var(--display);margin:0 0 6px;text-transform:uppercase}
+.pop .grade{display:inline-block;color:#fff;border-radius:4px;padding:1px 6px;font:600 12px var(--mono);margin-right:6px}
+.pop dl{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;margin:8px 0}
+.pop dt{color:#666}.pop dd{margin:0}
+@media (max-width:640px){
+  .panel{top:auto;bottom:0;left:0;right:0;width:auto;border-radius:14px 14px 0 0;max-height:60%;
+    padding-bottom:env(safe-area-inset-bottom)}
+  .toggle{display:block}
+  .panel.collapsed .body{display:none}
+  .leaflet-top.leaflet-right{top:env(safe-area-inset-top)}
+}
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<aside class="panel" id="panel">
+  <div class="head">
+    <h1>Trail<span>finder</span></h1>
+    <button class="toggle" id="toggle" aria-expanded="true">Einklappen</button>
+  </div>
+  <div class="body">
+    <div>
+      <button class="btn" id="load">Trails im Kartenausschnitt laden</button>
+      <div class="status" id="status" style="margin-top:6px">Lädt OpenStreetMap-Trails…</div>
+    </div>
+
+    <div>
+      <div class="lbl">Schwierigkeit (Singletrail-Skala)</div>
+      <div class="chips" id="chips"></div>
+    </div>
+
+    <label class="check"><input type="checkbox" id="unrated"> Auch Pfade ohne MTB-Bewertung zeigen (grau)</label>
+
+    <div>
+      <div class="lbl">Overlays</div>
+      <label class="check"><input type="checkbox" id="wmt" checked> MTB-Routen (Waymarked Trails)</label>
+      <label class="check"><input type="checkbox" id="hill"> Schummerung / Relief</label>
+    </div>
+
+    <div>
+      <div class="lbl">Im Ausschnitt</div>
+      <table id="stats"><tbody><tr><td>noch nichts geladen</td><td></td></tr></tbody></table>
+    </div>
+
+    <div class="row">
+      <button class="btn ghost" id="locate">Mein Standort</button>
+      <button class="btn ghost" id="home">Königstuhl</button>
+    </div>
+
+    <div>
+      <div class="lbl">Diesen Ausschnitt öffnen in</div>
+      <div class="links">
+        <a id="lnk-tf" target="_blank" rel="noopener">Trailforks →</a>
+        <a id="lnk-strava" target="_blank" rel="noopener">Strava Global Heatmap (MTB) →</a>
+        <a id="lnk-osm" target="_blank" rel="noopener">OpenStreetMap / Trail fehlt? Eintragen →</a>
+      </div>
+    </div>
+    <p class="note">Daten: © OpenStreetMap-Mitwirkende (ODbL), Overpass API, Waymarked Trails, OpenTopoMap. Trail-Bewertungen stammen aus der Community und können veraltet sein. Wegesperrungen und die 2-Meter-Regel in Baden-Württemberg beachten.</p>
+  </div>
+</aside>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const GRADES = [
+  {k:"0", label:"S0", css:"--s0", desc:"leicht"},
+  {k:"1", label:"S1", css:"--s1", desc:"Wurzeln, kleine Stufen"},
+  {k:"2", label:"S2", css:"--s2", desc:"Stufen, Steilstücke"},
+  {k:"3", label:"S3", css:"--s3", desc:"verblockt, Spitzkehren"},
+  {k:"4", label:"S4+", css:"--s4", desc:"Experte"},
+];
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const gradeOf = tags => {
+  const v = tags["mtb:scale"];
+  if (v == null) return null;
+  const n = parseInt(String(v).replace(/[^0-9]/g,""),10);
+  if (isNaN(n)) return null;
+  return n >= 4 ? "4" : String(n);
+};
+const colorOf = g => g == null ? cssVar("--nr") : cssVar(GRADES.find(x=>x.k===g).css);
+
+// --- Karte ---
+const START = [49.395, 8.735], START_Z = 14;
+const map = L.map("map", {zoomControl:false}).setView(START, START_Z);
+L.control.zoom({position:"topright"}).addTo(map);
+L.control.scale({imperial:false, position:"bottomright"}).addTo(map);
+
+const bases = {
+  "Topo (OpenTopoMap)": L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",{maxZoom:17,attribution:"© OpenStreetMap, SRTM | © OpenTopoMap (CC-BY-SA)"}),
+  "OpenStreetMap": L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap-Mitwirkende"}),
+  "CyclOSM": L.tileLayer("https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png",{maxZoom:20,attribution:"© OpenStreetMap | CyclOSM"}),
+  "Satellit (Esri)": L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",{maxZoom:19,attribution:"Esri, Maxar, Earthstar"}),
+};
+bases["Topo (OpenTopoMap)"].addTo(map);
+L.control.layers(bases, null, {position:"topright"}).addTo(map);
+
+const wmt = L.tileLayer("https://tile.waymarkedtrails.org/mtb/{z}/{x}/{y}.png",{maxZoom:18,opacity:.8,attribution:"Waymarked Trails"}).addTo(map);
+const hill = L.tileLayer("https://tiles.wmflabs.org/hillshading/{z}/{x}/{y}.png",{maxZoom:17,opacity:.5});
+document.getElementById("wmt").onchange = e => e.target.checked ? wmt.addTo(map) : map.removeLayer(wmt);
+document.getElementById("hill").onchange = e => e.target.checked ? hill.addTo(map) : map.removeLayer(hill);
+
+const trailLayer = L.layerGroup().addTo(map);
+let ways = [];            // {id, tags, latlngs, grade, km}
+const active = new Set(GRADES.map(g=>g.k));
+
+// --- Filter-Chips ---
+const chipsEl = document.getElementById("chips");
+GRADES.forEach(g=>{
+  const b = document.createElement("button");
+  b.className="chip"; b.setAttribute("aria-pressed","true"); b.title=g.desc;
+  b.innerHTML = `<i style="background:var(${g.css})"></i>${g.label}`;
+  b.onclick = ()=>{ active.has(g.k)?active.delete(g.k):active.add(g.k);
+    b.setAttribute("aria-pressed", active.has(g.k)); render(); };
+  chipsEl.appendChild(b);
+});
+document.getElementById("unrated").onchange = render;
+
+// --- Overpass ---
+const ENDPOINTS = ["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter"];
+async function overpass(q){
+  let lastErr;
+  for (const url of ENDPOINTS){
+    try{
+      const r = await fetch(url,{method:"POST",body:"data="+encodeURIComponent(q),headers:{"Content-Type":"application/x-www-form-urlencoded"}});
+      if (!r.ok) throw new Error("HTTP "+r.status);
+      return await r.json();
+    }catch(e){ lastErr=e; }
+  }
+  throw lastErr;
+}
+const statusEl = document.getElementById("status");
+const loadBtn = document.getElementById("load");
+
+async function load(){
+  if (map.getZoom() < 11){ statusEl.textContent="Bitte näher heranzoomen (mindestens Zoom 11)."; return; }
+  const b = map.getBounds(); const bbox = [b.getSouth(),b.getWest(),b.getNorth(),b.getEast()].map(n=>n.toFixed(5)).join(",");
+  const withUnrated = document.getElementById("unrated").checked;
+  const q = `[out:json][timeout:40];
+(
+  way["mtb:scale"](${bbox});
+  way["mtb:scale:imba"](${bbox});
+  ${withUnrated ? `way["highway"="path"]["bicycle"!~"no|dismount"]["access"!~"no|private"](${bbox});` : ""}
+);
+out geom tags;`;
+  loadBtn.disabled = true; statusEl.textContent = "Frage OpenStreetMap ab…";
+  try{
+    const data = await overpass(q);
+    ways = data.elements.filter(e=>e.geometry).map(e=>{
+      const ll = e.geometry.map(p=>[p.lat,p.lon]);
+      let m=0; for(let i=1;i<ll.length;i++) m += map.distance(ll[i-1],ll[i]);
+      return {id:e.id, tags:e.tags||{}, latlngs:ll, grade:gradeOf(e.tags||{}), km:m/1000};
+    });
+    render();
+    const rated = ways.filter(w=>w.grade!=null).length;
+    statusEl.textContent = `${rated} bewertete Abschnitte geladen${withUnrated?`, ${ways.length-rated} ohne Bewertung`:""}.`;
+  }catch(e){
+    statusEl.textContent = "Overpass ist gerade nicht erreichbar oder überlastet. In einer Minute nochmal versuchen.";
+  }finally{ loadBtn.disabled=false; }
+}
+loadBtn.onclick = load;
+
+// --- Darstellung ---
+function render(){
+  trailLayer.clearLayers();
+  const showUnrated = document.getElementById("unrated").checked;
+  const sums = {};
+  for (const w of ways){
+    if (w.grade==null && !showUnrated) continue;
+    if (w.grade!=null && !active.has(w.grade)) continue;
+    const key = w.grade ?? "nr"; sums[key] = (sums[key]||0) + w.km;
+    const col = colorOf(w.grade);
+    // breiter Halo für Lesbarkeit auf jeder Karte
+    L.polyline(w.latlngs,{color:"#fff",weight:7,opacity:.7,interactive:false}).addTo(trailLayer);
+    L.polyline(w.latlngs,{color:col,weight:w.grade==null?3:4,opacity:.95,dashArray:w.grade==null?"4 6":null})
+      .bindPopup(()=>popup(w),{maxWidth:280}).addTo(trailLayer);
+  }
+  const tb = document.querySelector("#stats tbody");
+  const rows = GRADES.filter(g=>sums[g.k]).map(g=>`<tr><td><i style="display:inline-block;width:10px;height:4px;background:var(${g.css});margin-right:6px;vertical-align:middle"></i>${g.label}</td><td>${sums[g.k].toFixed(1)} km</td></tr>`);
+  if (sums.nr) rows.push(`<tr><td>ohne Bewertung</td><td>${sums.nr.toFixed(1)} km</td></tr>`);
+  tb.innerHTML = rows.length ? rows.join("") : `<tr><td>keine Trails mit diesem Filter</td><td></td></tr>`;
+}
+
+const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const SURF = {ground:"Erde",dirt:"Erde",earth:"Erde",gravel:"Schotter",fine_gravel:"Feinschotter",rock:"Fels",roots:"Wurzeln",grass:"Gras",compacted:"verdichtet",sand:"Sand",asphalt:"Asphalt",stone:"Stein",pebblestone:"Kiesel"};
+function popup(w){
+  const t=w.tags, g=GRADES.find(x=>x.k===w.grade);
+  const name = t.name || t["mtb:name"] || "Unbenannter Trail";
+  const rows = [
+    ["Länge", w.km<1?Math.round(w.km*1000)+" m":w.km.toFixed(2)+" km"],
+    t["mtb:scale:uphill"] && ["Uphill", "S"+t["mtb:scale:uphill"]],
+    t["mtb:scale:imba"] && ["IMBA", t["mtb:scale:imba"]],
+    t.surface && ["Belag", SURF[t.surface]||t.surface],
+    t.incline && ["Gefälle", t.incline],
+    t.trail_visibility && ["Sichtbarkeit", t.trail_visibility],
+    t.bicycle && ["Fahrrad", t.bicycle],
+    t.highway && ["Wegtyp", t.highway],
+  ].filter(Boolean);
+  return `<div class="pop"><h3>${esc(name)}</h3>
+    ${g?`<span class="grade" style="background:var(${g.css})">${g.label}</span>${g.desc}`:`<span class="grade" style="background:var(--nr)">–</span>nicht bewertet`}
+    <dl>${rows.map(([a,b])=>`<dt>${a}</dt><dd>${esc(b)}</dd>`).join("")}</dl>
+    ${t.description?`<p>${esc(t.description)}</p>`:""}
+    <a href="https://www.openstreetmap.org/way/${w.id}" target="_blank" rel="noopener">Auf OSM ansehen</a></div>`;
+}
+
+// --- Links & Buttons ---
+function updateLinks(){
+  const c = map.getCenter(), z = map.getZoom(), la=c.lat.toFixed(5), lo=c.lng.toFixed(5);
+  document.getElementById("lnk-tf").href = `https://www.trailforks.com/map/?ps=1&lat=${la}&lon=${lo}&z=${z}`;
+  document.getElementById("lnk-strava").href = `https://www.strava.com/maps/global-heatmap?sport=MountainBikeRide&style=dark&gColor=hot#${z}/${la}/${lo}`;
+  document.getElementById("lnk-osm").href = `https://www.openstreetmap.org/#map=${z}/${la}/${lo}`;
+}
+map.on("moveend", updateLinks); updateLinks();
+
+let meMarker;
+document.getElementById("locate").onclick = ()=>{
+  if (!navigator.geolocation){ statusEl.textContent="Standort wird von diesem Browser nicht unterstützt."; return; }
+  statusEl.textContent="Suche Standort…";
+  navigator.geolocation.getCurrentPosition(p=>{
+    const ll=[p.coords.latitude,p.coords.longitude];
+    map.setView(ll,14);
+    meMarker && map.removeLayer(meMarker);
+    meMarker = L.circleMarker(ll,{radius:8,color:"#fff",weight:3,fillColor:cssVar("--accent"),fillOpacity:1}).addTo(map);
+    load();
+  },()=>{ statusEl.textContent="Standort nicht freigegeben."; },{enableHighAccuracy:true,timeout:10000});
+};
+document.getElementById("home").onclick = ()=>{ map.setView(START,START_Z); load(); };
+
+const panel = document.getElementById("panel"), tgl = document.getElementById("toggle");
+tgl.onclick = ()=>{ const c = panel.classList.toggle("collapsed");
+  tgl.textContent = c ? "Ausklappen" : "Einklappen"; tgl.setAttribute("aria-expanded", !c); };
+
+load();
+</script>
+</body>
+</html>
